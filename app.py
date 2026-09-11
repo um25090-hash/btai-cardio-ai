@@ -1,6 +1,11 @@
 import streamlit as st
 import pandas as pd
 import joblib
+from huggingface_hub import InferenceClient
+
+# -------------------------------------------------
+# PAGE CONFIG
+# -------------------------------------------------
 
 st.set_page_config(
     page_title="BTAI CardioAI",
@@ -8,12 +13,18 @@ st.set_page_config(
     layout="centered"
 )
 
-# Load trained model
+# -------------------------------------------------
+# LOAD HEART-DISEASE MODEL
+# -------------------------------------------------
+
 model = joblib.load("btai_cardio_model.pkl")
 feature_names = joblib.load("feature_names.pkl")
 
-st.title("❤️ BTAI CardioAI")
+# -------------------------------------------------
+# HEART-RISK PREDICTOR
+# -------------------------------------------------
 
+st.title("❤️ BTAI CardioAI")
 st.subheader("AI-Assisted Cardiovascular Assessment")
 
 st.warning(
@@ -22,7 +33,6 @@ st.warning(
 )
 
 st.markdown("---")
-
 st.header("Patient Information")
 
 age = st.number_input(
@@ -200,19 +210,18 @@ st.markdown("---")
 st.caption(
     "BTAI Hospital CardioAI • Educational AI Demonstration"
 )
+
 # -------------------------------------------------
 # BTAI CARDIOLOGY AI ASSISTANT
 # -------------------------------------------------
-
-from google import genai
-from google.genai import types
 
 st.markdown("---")
 st.header("💬 BTAI Cardiology AI Assistant")
 
 st.write(
     "Ask me about cardiology services, common heart-related tests, "
-    "how to prepare for an appointment, and when symptoms may require urgent care."
+    "appointment preparation, general heart-health information, "
+    "and when symptoms may require urgent medical attention."
 )
 
 st.info(
@@ -220,38 +229,133 @@ st.info(
     "It does not diagnose conditions, prescribe medicines, or replace a doctor."
 )
 
-# Create Gemini client using the secret stored in Streamlit
-client = genai.Client(
-    api_key=st.secrets["GEMINI_API_KEY"]
+# -------------------------------------------------
+# HUGGING FACE CLIENT
+# -------------------------------------------------
+
+client = InferenceClient(
+    provider="auto",
+    api_key=st.secrets["HF_TOKEN"]
 )
 
-# Create chat history the first time the app loads
+# -------------------------------------------------
+# CHAT HISTORY
+# -------------------------------------------------
+
 if "cardio_messages" not in st.session_state:
     st.session_state.cardio_messages = [
         {
             "role": "assistant",
             "content": (
                 "Hello! I am the BTAI Cardiology AI Assistant. "
-                "I can help you understand cardiology services, common tests, "
-                "appointment preparation, and general heart-health information. "
-                "How can I help you today?"
+                "I can help explain common cardiology tests and services, "
+                "help you prepare for an appointment, and provide general "
+                "heart-health information. How can I help you today?"
             )
         }
     ]
 
-# Display previous chat messages
 for message in st.session_state.cardio_messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-# User input box
+# -------------------------------------------------
+# USER INPUT
+# -------------------------------------------------
+
 user_question = st.chat_input(
     "Ask a cardiology-related question..."
 )
 
+# -------------------------------------------------
+# EMERGENCY CHECK
+# -------------------------------------------------
+
+def emergency_message(text):
+
+    text = text.lower()
+
+    emergency_phrases = [
+        "severe chest pain",
+        "very bad chest pain",
+        "bad chest pain",
+        "chest hurting badly",
+        "chest pain and breathless",
+        "chest pain and difficulty breathing",
+        "can't breathe",
+        "cannot breathe",
+        "severe breathlessness",
+        "difficulty breathing",
+        "fainted",
+        "fainting",
+        "collapsed",
+        "collapse",
+        "unconscious"
+    ]
+
+    return any(
+        phrase in text
+        for phrase in emergency_phrases
+    )
+
+# -------------------------------------------------
+# SYSTEM INSTRUCTIONS
+# -------------------------------------------------
+
+system_prompt = """
+You are the BTAI Cardiology AI Assistant.
+
+You are a patient-facing hospital information and care-navigation assistant.
+
+Your job is to:
+
+- explain common cardiology tests in simple language
+- explain common cardiology services
+- help patients prepare for a cardiology appointment
+- explain general heart-health terminology
+- provide general preventive heart-health information
+- help a patient understand which type of hospital service may be relevant
+- encourage professional medical evaluation when appropriate
+
+Examples of services you may mention when appropriate:
+
+- Cardiology consultation
+- ECG
+- Echocardiography
+- Holter monitoring
+- Preventive cardiac check-up
+- Blood pressure evaluation
+- Lipid profile review
+- Emergency care
+
+You must NOT:
+
+- diagnose a disease
+- state that the patient definitely has or does not have a disease
+- prescribe medicines
+- recommend medicine dosages
+- tell a patient to start, stop, increase, or decrease medication
+- replace a doctor
+- claim that an AI result is a medical diagnosis
+
+If a patient describes symptoms, explain that your information is general
+and does not constitute a diagnosis.
+
+If symptoms may be urgent, advise professional or emergency medical care.
+
+Use simple, calm, patient-friendly language.
+
+Avoid unnecessary medical jargon.
+
+Prefer short and clear answers unless the patient asks for more detail.
+"""
+
+# -------------------------------------------------
+# PROCESS QUESTION
+# -------------------------------------------------
+
 if user_question:
 
-    # Show and save user's question
     st.session_state.cardio_messages.append(
         {
             "role": "user",
@@ -262,65 +366,74 @@ if user_question:
     with st.chat_message("user"):
         st.markdown(user_question)
 
-    # System instructions for safe patient-facing behavior
-    system_prompt = """
-You are BTAI Cardiology AI Assistant, a patient-facing hospital care navigator.
+    # -------------------------------------------------
+    # SAFETY OVERRIDE FOR EMERGENCIES
+    # -------------------------------------------------
 
-Your role is to:
-- explain common cardiology services and tests in simple language
-- help patients understand which type of cardiology service may be appropriate
-- help patients prepare for a cardiology appointment
-- explain common heart-health terminology
-- provide general preventive heart-health information
-- encourage professional medical care when appropriate
+    if emergency_message(user_question):
 
-You must NOT:
-- diagnose a disease
-- claim that a patient definitely has or does not have a condition
-- prescribe medicines
-- recommend changing or stopping medication
-- provide medication doses
-- replace a cardiologist or emergency service
+        ai_answer = """
+🚨 **Please seek emergency medical care immediately.**
 
-EMERGENCY RULE:
-If the user mentions severe or persistent chest pain, severe difficulty breathing,
-fainting, collapse, new severe weakness, or other potentially life-threatening
-symptoms, clearly tell them to seek emergency medical care immediately.
+Severe chest pain, severe difficulty breathing, fainting, or collapse can be signs
+of a potentially serious medical emergency.
 
-Use calm, simple, patient-friendly language.
-Keep answers concise unless the patient asks for more detail.
-When useful, recommend the type of service they may want to discuss with the hospital,
-such as cardiology consultation, ECG, echocardiography, preventive cardiac check-up,
-or emergency care.
+Please contact your local emergency medical service or go to the nearest emergency
+department immediately.
 
-Always remind the patient that the information is general and not a diagnosis when
-the question involves symptoms or an individual medical situation.
+Do not rely on this chatbot or the CardioAI predictor to assess an emergency.
 """
 
-    # Include recent conversation so Gemini remembers the discussion
-    conversation_text = ""
+    else:
 
-    for message in st.session_state.cardio_messages[-8:]:
-        conversation_text += (
-            f"{message['role'].upper()}: {message['content']}\n"
-        )
+        # -------------------------------------------------
+        # BUILD CHAT HISTORY FOR AI
+        # -------------------------------------------------
 
-    try:
-        response = client.models.generate_content(
-            model="gemini-3.1-flash-lite",
-            contents=conversation_text,
-            config=types.GenerateContentConfig(
-                system_instruction=system_prompt,
+        messages = [
+            {
+                "role": "system",
+                "content": system_prompt
+            }
+        ]
+
+        for message in st.session_state.cardio_messages[-8:]:
+
+            messages.append(
+                {
+                    "role": message["role"],
+                    "content": message["content"]
+                }
+            )
+
+        # -------------------------------------------------
+        # CALL HUGGING FACE AI
+        # -------------------------------------------------
+
+        try:
+
+            response = client.chat.completions.create(
+                model="Qwen/Qwen2.5-7B-Instruct",
+                messages=messages,
+                max_tokens=350,
                 temperature=0.3
             )
-        )
 
-        ai_answer = response.text
+            ai_answer = response.choices[0].message.content
 
-    except Exception as e:
-       ai_answer = f"ERROR: {str(e)}"
+        except Exception:
 
-    # Save and display AI answer
+            ai_answer = (
+                "I'm temporarily unable to access the AI service. "
+                "Please try again shortly. If your symptoms are severe, sudden, "
+                "or concerning, please contact a healthcare professional or "
+                "seek emergency medical care."
+            )
+
+    # -------------------------------------------------
+    # DISPLAY AI RESPONSE
+    # -------------------------------------------------
+
     st.session_state.cardio_messages.append(
         {
             "role": "assistant",
