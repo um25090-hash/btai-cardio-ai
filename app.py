@@ -318,10 +318,7 @@ the question involves symptoms or an individual medical situation.
         ai_answer = response.text
 
     except Exception as e:
-        ai_answer = (
-            "I am temporarily unable to answer. "
-            "Please try again in a moment."
-        )
+       ai_answer = f"ERROR: {str(e)}"
 
     # Save and display AI answer
     st.session_state.cardio_messages.append(
