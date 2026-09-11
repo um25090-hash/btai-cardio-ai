@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import joblib
-from huggingface_hub import InferenceClient
+import requests
 
 # -------------------------------------------------
 # PAGE CONFIG
@@ -160,7 +160,6 @@ if st.button(
     "❤️ Analyse Cardiac Pattern",
     use_container_width=True
 ):
-
     input_data = {
         "age": age,
         "sex": sex,
@@ -230,15 +229,6 @@ st.info(
 )
 
 # -------------------------------------------------
-# HUGGING FACE CLIENT
-# -------------------------------------------------
-
-client = InferenceClient(
-    provider="auto",
-    api_key=st.secrets["HF_TOKEN"]
-)
-
-# -------------------------------------------------
 # CHAT HISTORY
 # -------------------------------------------------
 
@@ -247,10 +237,10 @@ if "cardio_messages" not in st.session_state:
         {
             "role": "assistant",
             "content": (
-                "Hello! I am the BTAI Cardiology AI Assistant. "
-                "I can help explain common cardiology tests and services, "
-                "help you prepare for an appointment, and provide general "
-                "heart-health information. How can I help you today?"
+                "Hello! I’m the BTAI Cardiology AI Assistant. "
+                "I can help explain cardiology tests and services, "
+                "help you prepare for an appointment, and answer general "
+                "heart-health questions. How can I help you today?"
             )
         }
     ]
@@ -260,46 +250,41 @@ for message in st.session_state.cardio_messages:
         st.markdown(message["content"])
 
 # -------------------------------------------------
-# USER INPUT
+# EMERGENCY SAFETY CHECK
 # -------------------------------------------------
 
-user_question = st.chat_input(
-    "Ask a cardiology-related question..."
-)
+def is_emergency(text):
+    t = text.lower().replace("’", "'")
 
-# -------------------------------------------------
-# EMERGENCY CHECK
-# -------------------------------------------------
-
-def emergency_message(text):
-
-    text = text.lower()
-
-    emergency_phrases = [
+    emergency_terms = [
         "severe chest pain",
         "very bad chest pain",
-        "bad chest pain",
+        "terrible chest pain",
+        "extreme chest pain",
+        "chest painnn",
+        "chest is hurting badly",
         "chest hurting badly",
-        "chest pain and breathless",
-        "chest pain and difficulty breathing",
+        "cant breathe",
         "can't breathe",
         "cannot breathe",
-        "severe breathlessness",
+        "unable to breathe",
         "difficulty breathing",
+        "severe breathlessness",
+        "gasping for air",
         "fainted",
         "fainting",
         "collapsed",
         "collapse",
-        "unconscious"
+        "unconscious",
+        "chest pain and sweating",
+        "chest pain and breathless",
+        "chest pain with breathlessness"
     ]
 
-    return any(
-        phrase in text
-        for phrase in emergency_phrases
-    )
+    return any(term in t for term in emergency_terms)
 
 # -------------------------------------------------
-# SYSTEM INSTRUCTIONS
+# OPENROUTER SYSTEM PROMPT
 # -------------------------------------------------
 
 system_prompt = """
@@ -307,18 +292,17 @@ You are the BTAI Cardiology AI Assistant.
 
 You are a patient-facing hospital information and care-navigation assistant.
 
-Your job is to:
-
-- explain common cardiology tests in simple language
+Your role is to:
+- explain common cardiology tests and procedures in simple language
 - explain common cardiology services
-- help patients prepare for a cardiology appointment
-- explain general heart-health terminology
+- help patients understand which kind of cardiology service may be relevant
+- help patients prepare for cardiology appointments
+- explain common heart-health terminology
 - provide general preventive heart-health information
-- help a patient understand which type of hospital service may be relevant
-- encourage professional medical evaluation when appropriate
+- answer general conversational questions naturally
+- be friendly, calm, clear, and concise
 
-Examples of services you may mention when appropriate:
-
+Examples of services you may mention:
 - Cardiology consultation
 - ECG
 - Echocardiography
@@ -329,30 +313,36 @@ Examples of services you may mention when appropriate:
 - Emergency care
 
 You must NOT:
-
 - diagnose a disease
-- state that the patient definitely has or does not have a disease
+- claim that someone definitely has or does not have a condition
 - prescribe medicines
-- recommend medicine dosages
-- tell a patient to start, stop, increase, or decrease medication
-- replace a doctor
-- claim that an AI result is a medical diagnosis
+- provide medication dosages
+- tell a patient to start, stop, increase, or decrease medicines
+- replace a cardiologist
+- claim that AI output is a medical diagnosis
 
-If a patient describes symptoms, explain that your information is general
-and does not constitute a diagnosis.
+If a user describes symptoms:
+- provide general guidance only
+- encourage professional medical evaluation when appropriate
+- remind them that the response is not a diagnosis
 
-If symptoms may be urgent, advise professional or emergency medical care.
+If there may be a medical emergency:
+- advise immediate emergency medical care
 
-Use simple, calm, patient-friendly language.
+You should also answer normal questions naturally.
+For example, if asked your name, say:
+"I’m the BTAI Cardiology AI Assistant."
 
-Avoid unnecessary medical jargon.
-
-Prefer short and clear answers unless the patient asks for more detail.
+Keep answers patient-friendly and easy to understand.
 """
 
 # -------------------------------------------------
-# PROCESS QUESTION
+# USER INPUT
 # -------------------------------------------------
+
+user_question = st.chat_input(
+    "Ask a cardiology-related question..."
+)
 
 if user_question:
 
@@ -367,19 +357,17 @@ if user_question:
         st.markdown(user_question)
 
     # -------------------------------------------------
-    # SAFETY OVERRIDE FOR EMERGENCIES
+    # HARD EMERGENCY OVERRIDE
     # -------------------------------------------------
 
-    if emergency_message(user_question):
+    if is_emergency(user_question):
 
         ai_answer = """
 🚨 **Please seek emergency medical care immediately.**
 
-Severe chest pain, severe difficulty breathing, fainting, or collapse can be signs
-of a potentially serious medical emergency.
+Severe chest pain, severe breathing difficulty, fainting, collapse, or similar symptoms can represent a medical emergency.
 
-Please contact your local emergency medical service or go to the nearest emergency
-department immediately.
+Please contact your local emergency medical service or go to the nearest emergency department immediately.
 
 Do not rely on this chatbot or the CardioAI predictor to assess an emergency.
 """
@@ -387,7 +375,7 @@ Do not rely on this chatbot or the CardioAI predictor to assess an emergency.
     else:
 
         # -------------------------------------------------
-        # BUILD CHAT HISTORY FOR AI
+        # BUILD CONVERSATION
         # -------------------------------------------------
 
         messages = [
@@ -397,8 +385,7 @@ Do not rely on this chatbot or the CardioAI predictor to assess an emergency.
             }
         ]
 
-        for message in st.session_state.cardio_messages[-8:]:
-
+        for message in st.session_state.cardio_messages[-10:]:
             messages.append(
                 {
                     "role": message["role"],
@@ -407,32 +394,40 @@ Do not rely on this chatbot or the CardioAI predictor to assess an emergency.
             )
 
         # -------------------------------------------------
-        # CALL HUGGING FACE AI
+        # CALL OPENROUTER
         # -------------------------------------------------
 
         try:
-
-            response = client.chat.completions.create(
-                model="Qwen/Qwen2.5-7B-Instruct",
-                messages=messages,
-                max_tokens=350,
-                temperature=0.3
+            response = requests.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {st.secrets['OPENROUTER_API_KEY']}",
+                    "Content-Type": "application/json",
+                    "X-Title": "BTAI Cardiology AI Assistant"
+                },
+                json={
+                    "model": "openrouter/free",
+                    "messages": messages,
+                    "temperature": 0.3,
+                    "max_tokens": 450
+                },
+                timeout=45
             )
 
-            ai_answer = response.choices[0].message.content
+            if response.status_code != 200:
+                raise Exception(
+                    f"OpenRouter error {response.status_code}: {response.text}"
+                )
 
-        except Exception:
+            data = response.json()
 
+            ai_answer = data["choices"][0]["message"]["content"]
+
+        except Exception as e:
             ai_answer = (
-                "I'm temporarily unable to access the AI service. "
-                "Please try again shortly. If your symptoms are severe, sudden, "
-                "or concerning, please contact a healthcare professional or "
-                "seek emergency medical care."
+                "I’m temporarily unable to reach the AI service. "
+                "Please try again shortly."
             )
-
-    # -------------------------------------------------
-    # DISPLAY AI RESPONSE
-    # -------------------------------------------------
 
     st.session_state.cardio_messages.append(
         {
