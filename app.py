@@ -200,3 +200,136 @@ st.markdown("---")
 st.caption(
     "BTAI Hospital CardioAI • Educational AI Demonstration"
 )
+# -------------------------------------------------
+# BTAI CARDIOLOGY AI ASSISTANT
+# -------------------------------------------------
+
+from google import genai
+from google.genai import types
+
+st.markdown("---")
+st.header("💬 BTAI Cardiology AI Assistant")
+
+st.write(
+    "Ask me about cardiology services, common heart-related tests, "
+    "how to prepare for an appointment, and when symptoms may require urgent care."
+)
+
+st.info(
+    "This assistant provides general educational and hospital-navigation information. "
+    "It does not diagnose conditions, prescribe medicines, or replace a doctor."
+)
+
+# Create Gemini client using the secret stored in Streamlit
+client = genai.Client(
+    api_key=st.secrets["GEMINI_API_KEY"]
+)
+
+# Create chat history the first time the app loads
+if "cardio_messages" not in st.session_state:
+    st.session_state.cardio_messages = [
+        {
+            "role": "assistant",
+            "content": (
+                "Hello! I am the BTAI Cardiology AI Assistant. "
+                "I can help you understand cardiology services, common tests, "
+                "appointment preparation, and general heart-health information. "
+                "How can I help you today?"
+            )
+        }
+    ]
+
+# Display previous chat messages
+for message in st.session_state.cardio_messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+
+# User input box
+user_question = st.chat_input(
+    "Ask a cardiology-related question..."
+)
+
+if user_question:
+
+    # Show and save user's question
+    st.session_state.cardio_messages.append(
+        {
+            "role": "user",
+            "content": user_question
+        }
+    )
+
+    with st.chat_message("user"):
+        st.markdown(user_question)
+
+    # System instructions for safe patient-facing behavior
+    system_prompt = """
+You are BTAI Cardiology AI Assistant, a patient-facing hospital care navigator.
+
+Your role is to:
+- explain common cardiology services and tests in simple language
+- help patients understand which type of cardiology service may be appropriate
+- help patients prepare for a cardiology appointment
+- explain common heart-health terminology
+- provide general preventive heart-health information
+- encourage professional medical care when appropriate
+
+You must NOT:
+- diagnose a disease
+- claim that a patient definitely has or does not have a condition
+- prescribe medicines
+- recommend changing or stopping medication
+- provide medication doses
+- replace a cardiologist or emergency service
+
+EMERGENCY RULE:
+If the user mentions severe or persistent chest pain, severe difficulty breathing,
+fainting, collapse, new severe weakness, or other potentially life-threatening
+symptoms, clearly tell them to seek emergency medical care immediately.
+
+Use calm, simple, patient-friendly language.
+Keep answers concise unless the patient asks for more detail.
+When useful, recommend the type of service they may want to discuss with the hospital,
+such as cardiology consultation, ECG, echocardiography, preventive cardiac check-up,
+or emergency care.
+
+Always remind the patient that the information is general and not a diagnosis when
+the question involves symptoms or an individual medical situation.
+"""
+
+    # Include recent conversation so Gemini remembers the discussion
+    conversation_text = ""
+
+    for message in st.session_state.cardio_messages[-8:]:
+        conversation_text += (
+            f"{message['role'].upper()}: {message['content']}\n"
+        )
+
+    try:
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=conversation_text,
+            config=types.GenerateContentConfig(
+                system_instruction=system_prompt,
+                temperature=0.3
+            )
+        )
+
+        ai_answer = response.text
+
+    except Exception as e:
+        ai_answer = (
+            "I am temporarily unable to answer. "
+            "Please try again in a moment."
+        )
+
+    # Save and display AI answer
+    st.session_state.cardio_messages.append(
+        {
+            "role": "assistant",
+            "content": ai_answer
+        }
+    )
+
+    with st.chat_message("assistant"):
+        st.markdown(ai_answer)
